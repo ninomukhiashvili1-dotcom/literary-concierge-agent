@@ -13,27 +13,33 @@ from langgraph.types import interrupt
 # თითოეული მომხმარებლისთვის ცალკე თარო (thread_id-ის მიხედვით)
 SHELVES_BY_THREAD = {}
 
+
 def _get_shelf(thread_id: str) -> list:
     return SHELVES_BY_THREAD.setdefault(thread_id, [])
+
 
 @tool
 def search_books(query: str) -> list:
     """Search books in Open Library by title, author, or topic. Returns top 3 matches."""
-    response = requests.get(
-        "https://openlibrary.org/search.json",
-        params={"q": query, "limit": 3},
-        timeout=15,
-    )
-    response.raise_for_status()
-    docs = response.json().get("docs", [])
-    results = []
-    for doc in docs:
-        results.append({
-            "title": doc.get("title", "Unknown"),
-            "author": ", ".join(doc.get("author_name", ["Unknown"])),
-            "first_publish_year": doc.get("first_publish_year", "Unknown"),
-        })
-    return results if results else [{"message": "No books found."}]
+    try:
+        response = requests.get(
+            "https://openlibrary.org/search.json",
+            params={"q": query, "limit": 3},
+            timeout=15,
+        )
+        response.raise_for_status()
+        docs = response.json().get("docs", [])
+        results = []
+        for doc in docs:
+            results.append({
+                "title": doc.get("title", "Unknown"),
+                "author": ", ".join(doc.get("author_name", ["Unknown"])),
+                "first_publish_year": doc.get("first_publish_year", "Unknown"),
+            })
+        return results if results else [{"message": "No books found."}]
+    except Exception as e:
+        return [{"error": f"Open Library unavailable: {e}"}]
+
 
 @tool
 def get_historical_context(topic_or_year: str) -> str:
@@ -62,98 +68,105 @@ def get_historical_context(topic_or_year: str) -> str:
     except Exception as e:
         return f"Wikipedia temporarily rate-limited ({e}). Answer briefly using your own historical knowledge."
 
+
 @tool
 def get_weather(city: str = "Tbilisi") -> dict:
     """Get current weather temperature (Celsius) and precipitation for a city."""
-    geo_resp = requests.get(
-        "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": city, "count": 1},
-        timeout=15,
-    )
-    geo_resp.raise_for_status()
-    results = geo_resp.json().get("results")
-    if not results:
-        return {"error": f"City '{city}' not found."}
-    lat, lon = results[0]["latitude"], results[0]["longitude"]
-    weather_resp = requests.get(
-        "https://api.open-meteo.com/v1/forecast",
-        params={"latitude": lat, "longitude": lon, "current": "temperature_2m,precipitation"},
-        timeout=15,
-    )
-    weather_resp.raise_for_status()
-    current = weather_resp.json()["current"]
-    return {
-        "city": results[0]["name"],
-        "temperature_c": current["temperature_2m"],
-        "precipitation_mm": current["precipitation"],
-    }
+    try:
+        geo_resp = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": city, "count": 1, "language": "en", "format": "json"},
+            timeout=15,
+        )
+        geo_resp.raise_for_status()
+        results = geo_resp.json().get("results", [])
+        if not results:
+            return {"error": f"City '{city}' not found."}
+        lat, lon, name = results[0]["latitude"], results[0]["longitude"], results[0]["name"]
+        weather_resp = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={"latitude": lat, "longitude": lon, "current": "temperature_2m,precipitation"},
+            timeout=15,
+        )
+        weather_resp.raise_for_status()
+        current = weather_resp.json().get("current", {})
+        return {
+            "city": name,
+            "temperature_c": current.get("temperature_2m"),
+            "precipitation_mm": current.get("precipitation"),
+        }
+    except Exception as e:
+        return {"error": f"Weather service unavailable: {e}"}
+
 
 def make_shelf_tools(thread_id: str):
-    shelf = _get_shelf(thread_id)
-
     @tool
-    def add_book(title: str, author: str = "Unknown", year: str = "Unknown") -> str:
+    def add_book(title: str, author: str, year: str = "Unknown") -> str:
         """Add a book to the user's personal reading shelf."""
+        shelf = _get_shelf(thread_id)
         for b in shelf:
             if b["title"].lower() == title.lower():
                 return f"'{title}' is already on your shelf."
-        shelf.append({"title": title, "author": author, "year": str(year), "status": "To Read", "rating": None, "note": ""})
-        return f"Added '{title}' by {author} ({year}) to your reading shelf."
+        shelf.append({"title": title, "author": author, "year": str(year), "notes": []})
+        return f"Added '{title}' by {author} ({year}) to your shelf."
 
     @tool
     def list_books() -> list:
-        """List all books currently saved on the user's personal reading shelf."""
-        return shelf if shelf else [{"message": "Your reading shelf is currently empty."}]
+        """List all books currently on the user's reading shelf."""
+        shelf = _get_shelf(thread_id)
+        return shelf if shelf else [{"message": "Your reading shelf is empty."}]
 
     @tool
-    def log_reading_note(title: str, rating: int, note: str = "") -> str:
-        """Mark a book as Read, rate it (1-5), and save a note."""
+    def log_reading_note(title: str, note: str) -> str:
+        """Save a reading note or quote for a book on the user's shelf."""
+        shelf = _get_shelf(thread_id)
         for b in shelf:
             if b["title"].lower() == title.lower():
-                b["status"] = "Read"
-                b["rating"] = max(1, min(5, rating))
-                b["note"] = note
-                return f"Updated '{b['title']}': marked as Read, rated {b['rating']}/5."
-        return f"Book '{title}' not found on your shelf."
+                b["notes"].append(note)
+                return f"Saved note for '{b['title']}'."
+        return f"Book '{title}' was not found on your shelf."
 
     @tool
-    def get_reading_stats() -> dict:
-        """Get reading shelf statistics."""
-        total = len(shelf)
-        read_books = [b for b in shelf if b["status"] == "Read"]
-        ratings = [b["rating"] for b in read_books if b["rating"] is not None]
-        avg_rating = round(sum(ratings) / len(ratings), 2) if ratings else 0
-        return {"total_books": total, "read_books": len(read_books), "to_read_books": total - len(read_books), "average_rating": avg_rating}
+    def get_reading_notes(title: str) -> str:
+        """Retrieve saved notes for a book on the user's shelf."""
+        shelf = _get_shelf(thread_id)
+        for b in shelf:
+            if b["title"].lower() == title.lower():
+                if not b["notes"]:
+                    return f"No notes saved yet for '{b['title']}'."
+                return f"Notes for '{b['title']}': " + " | ".join(b["notes"])
+        return f"Book '{title}' was not found on your shelf."
 
     @tool
     def delete_book(title: str) -> str:
-        """Delete a book from the shelf. Requires explicit user confirmation."""
+        """Delete a book from the user's reading shelf (requires human confirmation)."""
+        shelf = _get_shelf(thread_id)
         target = next((b for b in shelf if b["title"].lower() == title.lower()), None)
         if not target:
-            return f"Book '{title}' was not found on your shelf."
-        approved = interrupt(f"Are you sure you want to delete '{target['title']}' by {target['author']} from your shelf?")
-        if approved:
+            return f"Book '{title}' is not on your shelf."
+        decision = interrupt(
+            f"Are you sure you want to delete '{target['title']}' by {target['author']} from your shelf?"
+        )
+        if str(decision).strip().lower() in ("yes", "y", "true", "confirm", "დიახ"):
             shelf.remove(target)
             return f"Deleted '{target['title']}' from your shelf."
-        return f"Deletion cancelled. '{target['title']}' remains on your shelf."
+        return f"Deletion of '{target['title']}' was cancelled."
 
-    return [search_books, get_historical_context, get_weather, add_book, list_books, log_reading_note, get_reading_stats, delete_book]
+    return [add_book, list_books, log_reading_note, get_reading_notes, delete_book]
+
 
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
 
+
 SYSTEM_PROMPT = """You are the 'Literary Time-Machine & Reading Club Concierge', a warm and knowledgeable literary assistant.
-Use Open Library (`search_books`), Wikipedia (`get_historical_context`), Open-Meteo (`get_weather`), and shelf tools (`add_book`, `list_books`, `log_reading_note`, `get_reading_stats`, `delete_book`).
-Always call `delete_book` when asked to delete a book. Respond in the user's language (Georgian or English)."""
+Use Open Library (`search_books`), Wikipedia (`get_historical_context`), Open-Meteo (`get_weather`), and shelf tools (`add_book`, `list_books`, `log_reading_note`, `get_reading_notes`, `delete_book`).
+Always call `delete_book` when asked to delete a book. Respond clearly and concisely in the user's language (Georgian or English)."""
+
 
 def build_graph(thread_id: str = "default"):
-    tools = make_shelf_tools(thread_id)
-  llm = ChatGroq(
-        model="llama-3.1-8b-instant",
-        temperature=0.3,
-        frequency_penalty=0.6,
-        max_tokens=1024,
-    )
+    tools = [search_books, get_historical_context, get_weather] + make_shelf_tools(thread_id)
+    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.3, frequency_penalty=0.6, max_tokens=1024)
     llm_with_tools = llm.bind_tools(tools)
 
     def assistant_node(state: AgentState):
