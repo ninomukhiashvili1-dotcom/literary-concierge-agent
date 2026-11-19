@@ -166,7 +166,7 @@ Always call `delete_book` when asked to delete a book. Respond clearly and conci
 
 def build_graph(thread_id: str = "default"):
     tools = [search_books, get_historical_context, get_weather] + make_shelf_tools(thread_id)
-    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.3, frequency_penalty=0.6, max_tokens=1024)
+    llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.3, frequency_penalty=0.6, max_tokens=1024)
     llm_with_tools = llm.bind_tools(tools)
 
     def assistant_node(state: AgentState):
