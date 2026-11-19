@@ -39,25 +39,28 @@ def search_books(query: str) -> list:
 def get_historical_context(topic_or_year: str) -> str:
     """Get a short historical summary from Wikipedia about an author or publication year."""
     headers = {"User-Agent": "LiteraryCuratorAgent/1.0 (Educational Project)"}
-    search_resp = requests.get(
-        "https://en.wikipedia.org/w/api.php",
-        params={"action": "query", "list": "search", "srsearch": topic_or_year, "format": "json", "srlimit": 1},
-        headers=headers,
-        timeout=15,
-    )
-    search_resp.raise_for_status()
-    hits = search_resp.json().get("query", {}).get("search", [])
-    if not hits:
-        return f"No Wikipedia context found for '{topic_or_year}'."
-    page_title = hits[0]["title"]
-    summary_resp = requests.get(
-        f"https://en.wikipedia.org/api/rest_v1/page/summary/{page_title}",
-        headers=headers,
-        timeout=15,
-    )
-    if summary_resp.status_code == 200:
-        return f"{page_title}: {summary_resp.json().get('extract', '')[:450]}..."
-    return f"Found topic: {page_title}"
+    try:
+        search_resp = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={"action": "query", "list": "search", "srsearch": topic_or_year, "format": "json", "srlimit": 1},
+            headers=headers,
+            timeout=15,
+        )
+        search_resp.raise_for_status()
+        hits = search_resp.json().get("query", {}).get("search", [])
+        if not hits:
+            return f"No Wikipedia context found for '{topic_or_year}'."
+        page_title = hits[0]["title"]
+        summary_resp = requests.get(
+            f"https://en.wikipedia.org/api/rest_v1/page/summary/{page_title}",
+            headers=headers,
+            timeout=15,
+        )
+        if summary_resp.status_code == 200:
+            return f"{page_title}: {summary_resp.json().get('extract', '')[:450]}..."
+        return f"Found topic: {page_title}"
+    except Exception as e:
+        return f"Wikipedia temporarily rate-limited ({e}). Answer briefly using your own historical knowledge."
 
 @tool
 def get_weather(city: str = "Tbilisi") -> dict:
