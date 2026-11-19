@@ -148,7 +148,12 @@ Always call `delete_book` when asked to delete a book. Respond in the user's lan
 
 def build_graph(thread_id: str = "default"):
     tools = make_shelf_tools(thread_id)
-    llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0, max_tokens=500)
+    llm = ChatGroq(
+    model="llama-3.3-70b-versatile",
+    temperature=0.3,
+    frequency_penalty=0.5,
+    max_tokens=1024,
+)
     llm_with_tools = llm.bind_tools(tools)
 
     def assistant_node(state: AgentState):
