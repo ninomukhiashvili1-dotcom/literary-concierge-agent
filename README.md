@@ -12,3 +12,19 @@ An AI-powered reading assistant built with **LangGraph**, **ChatGroq**, and **St
 1. Install dependencies:
    ```bash
    pip install -r requirements.txt
+```
+
+2. Set your API key (do not commit real keys):
+```bash
+export GROQ_API_KEY=""
+```
+
+3. Run the Streamlit web app or CLI:
+```bash
+streamlit run app.py
+# or
+python main.py
+```
+
+## Live Demo
+- **Streamlit App:** https://iaqcbyen4mkrsoqdmvxzbf.streamlit.app
